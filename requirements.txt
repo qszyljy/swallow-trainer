@@ -1,0 +1,8 @@
+numpy>=1.26
+scipy>=1.11
+scikit-learn>=1.4
+matplotlib>=3.8
+# 可选：把 sklearn 模型导出成 Dart 代码（端侧备选路线）
+m2cgen>=0.10
+# 可选：1D-CNN 训练与 tflite 导出（Windows 建议 Python 3.11 + TF 2.16）
+# tensorflow>=2.16
