@@ -119,7 +119,8 @@ def generate(
                 tail = _rest(rng, sr, TAIL_SEC)
                 signal = np.concatenate([lead, body, tail])
                 signal = _subject_color(signal, sr, rng)
-                signal += _rest(rng, sr, len(signal) / sr) * 0.5
+                # 底噪按样本数直接生成：按秒生成会因 int(dur*sr) 截断差一个样本
+                signal += rng.standard_normal(len(signal)) * rng.uniform(0.0015, 0.004)
                 # 只在快要削顶时才压一下，避免把安静样本放大成爆音
                 peak = float(np.max(np.abs(signal)))
                 if peak > 0.95:

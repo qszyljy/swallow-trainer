@@ -39,6 +39,8 @@ def export_package(
     *,
     labels: list[str] | None = None,
     dart: bool = False,
+    tflite_path: str | Path | None = None,
+    latency_ms: float | None = None,
 ) -> Path:
     pkg = Path(out_dir) / "export"
     pkg.mkdir(parents=True, exist_ok=True)
@@ -46,8 +48,16 @@ def export_package(
     class_order = list(labels or CLASSES) + [REST]
     (pkg / "labels.txt").write_text("\n".join(class_order) + "\n", encoding="utf-8")
 
-    model_path = pkg / "model.joblib"
-    dump(model, model_path)
+    if tflite_path is not None:
+        model_path = pkg / "model.tflite"
+        model_path.write_bytes(Path(tflite_path).read_bytes())
+        model_format = "tflite"
+        model_input = "raw_waveform"
+    else:
+        model_path = pkg / "model.joblib"
+        dump(model, model_path)
+        model_format = "joblib"
+        model_input = "features"
 
     preprocess = {
         "version": 1,
@@ -58,15 +68,16 @@ def export_package(
         "normalize": {"mode": "per_window_zscore"},
         "labels": class_order,
         "model": {
-            "format": "joblib",
+            "format": model_format,
             "file": model_path.name,
-            "input": "features",
+            "input": model_input,
             "feature_count": config.get("feature_count"),
             "feature_names": config.get("feature_names", []),
         },
         "deploy_note": (
-            "sklearn 模型用于实验对比；端侧部署建议走 1D-CNN + tflite，"
-            "或 m2cgen 生成 Dart 代码"
+            "tflite 直接给手机 App 用；joblib 只用于实验对比"
+            if tflite_path is not None
+            else "sklearn 模型用于实验对比；端侧部署走 1D-CNN + tflite"
         ),
     }
     _dump_json(pkg / "preprocess.json", preprocess)
@@ -93,6 +104,7 @@ def export_package(
         ],
         "dataset": dataset_summary,
         "model_size_bytes": model_path.stat().st_size,
+        "inference_ms_pc": latency_ms,
         "environment": {
             "python": sys.version.split()[0],
             "platform": platform.platform(),

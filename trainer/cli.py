@@ -55,13 +55,6 @@ def cmd_synthetic(args: argparse.Namespace) -> int:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    if args.model not in models.SKLEARN_KINDS:
-        print(
-            f"模型 {args.model} 暂未接入 CLI。1D-CNN 的 build/train/export_tflite "
-            "已写在 trainer/cnn.py，需要在装了 TensorFlow 的机器上接入。"
-        )
-        return 2
-
     run_dir = Path(args.out) / datetime.now().strftime("run_%Y%m%d_%H%M%S")
     run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -77,6 +70,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         print("没有切出任何窗口，检查录音长度是否大于一个窗")
         return 1
 
+    if args.model == "cnn":
+        return _run_cnn(args, samples, run_dir, started)
+
     X = _extract(samples, args.sample_rate)
     y = [s.label for s in samples]
     subjects = np.asarray([s.subject for s in samples])
@@ -89,7 +85,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     evaluate.plot_confusion(
         result,
         run_dir / "confusion.png",
-        title=f"{args.model} · 窗长 {args.window:.2f}s · LOSO",
+        title=f"{args.model} | window {args.window:.2f}s | LOSO",
     )
 
     final_model = models.build_sklearn(args.model, args.seed)
@@ -120,6 +116,71 @@ def cmd_run(args: argparse.Namespace) -> int:
     elapsed = time.time() - started
     print(f"导出包 -> {pkg}")
     print(f"耗时 {elapsed:.1f} s")
+    if args.synthetic:
+        print("警告：本次用的是合成数据，指标没有意义，只证明管线跑通。")
+    return 0
+
+
+def _run_cnn(args: argparse.Namespace, samples: list, run_dir: Path, started: float) -> int:
+    from . import runner_cnn  # 延迟导入：没装 TensorFlow 时其它模型照常可用
+
+    try:
+        result, adapter, input_len = runner_cnn.train_pipeline(
+            samples,
+            epochs=args.epochs,
+            batch_size=args.batch,
+            seed=args.seed,
+        )
+    except RuntimeError as exc:
+        print(exc)
+        return 2
+
+    _print_summary(result, samples)
+    evaluate.plot_confusion(
+        result,
+        run_dir / "confusion.png",
+        title=f"1d-cnn | window {args.window:.2f}s | LOSO",
+    )
+
+    tflite_path = run_dir / "model.tflite"
+    runner_cnn.export_tflite(adapter.model, tflite_path)
+    size_kb = tflite_path.stat().st_size / 1024
+
+    latency = None
+    try:
+        latency = runner_cnn.measure_latency_ms(tflite_path)
+    except Exception as exc:  # noqa: BLE001 - 测不到时延不该让整次训练失败
+        print(f"[warn] 电脑端时延测量失败：{exc}")
+
+    config = {
+        "model_kind": "cnn",
+        "data": str(Path(args.data).resolve()),
+        "sample_rate": args.sample_rate,
+        "window_seconds": args.window,
+        "hop_seconds": args.hop,
+        "seed": args.seed,
+        "epochs": args.epochs,
+        "batch_size": args.batch,
+        "input_samples": int(input_len),
+        "feature_count": None,
+        "feature_names": [],
+        "fold_count": result["n_folds"],
+        "synthetic": args.synthetic,
+    }
+    pkg = export.export_package(
+        run_dir,
+        adapter.model,
+        result,
+        dataset.dataset_summary(samples),
+        config,
+        labels=list(CLASSES),
+        tflite_path=tflite_path,
+        latency_ms=latency,
+    )
+
+    print(f"模型 {size_kb:.0f} KB" + (f" · 电脑端推理 {latency:.1f} ms" if latency else ""))
+    print(f"导出包 -> {pkg}")
+    print(f"耗时 {time.time() - started:.1f} s")
     if args.synthetic:
         print("警告：本次用的是合成数据，指标没有意义，只证明管线跑通。")
     return 0
@@ -219,6 +280,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--hop", type=float, default=DEFAULT_HOP_SEC)
     run.add_argument("--sample-rate", type=int, default=DEFAULT_SR, dest="sample_rate")
     run.add_argument("--seed", type=int, default=0)
+    run.add_argument("--epochs", type=int, default=30, help="仅 cnn 用")
+    run.add_argument("--batch", type=int, default=16, help="仅 cnn 用")
     run.add_argument("--dart", action="store_true", help="额外用 m2cgen 导出 Dart 代码")
     run.add_argument("--synthetic", action="store_true", help="标记：本次数据是合成的")
     run.set_defaults(func=cmd_run)

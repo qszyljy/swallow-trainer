@@ -24,6 +24,9 @@ python -m trainer.cli run --data data/synthetic --out runs --model svm --synthet
 
 # 3. 模型对比 × 窗长敏感性，出报告用的表格
 python -m trainer.cli experiments --data data/synthetic --out runs --synthetic
+
+# 4. 1D-CNN + tflite 导出（需要 TensorFlow，建议 Python 3.11 + TF 2.16）
+python -m trainer.cli run --data data/synthetic --out runs --model cnn --epochs 30
 ```
 
 真数据到了，把 `--data` 指到录音目录，去掉 `--synthetic`，其余不用改。
@@ -93,13 +96,24 @@ trainer/
 - **每类召回**：混淆矩阵行和做分母，所以「真值是吞咽、被判成静息」也算漏检
 - **误触发率**：静息窗里被判成任意事件类的比例，单独统计，不混进三类指标
 
+## 已经跑通的部分（合成数据验证）
+
+| 命令 | 产物 | 状态 |
+|---|---|---|
+| `synthetic` | `data/synthetic/` + labels.csv | ✅ |
+| `run --model svm/rf` | `runs/run_*/confusion.png` + export 四件套 | ✅ |
+| `run --model cnn` | `export/model.tflite` + eval.json（含体积/时延） | 需装 TF |
+| `experiments` | `runs/exp_*/experiments.md` | ✅ |
+| manifest 片段包 | 自动识别 `manifest.csv`，按标注区间切窗 | ✅ |
+
+合成数据上 1 s 窗的 SVM 宏 F1 是 0.99、0.5 s 窗只有 0.82——**这只是证明链路通，
+数字没有意义**（合成信号原本就好分）。真数据必须重跑。
+
 ## 还没做（按优先级）
 
-1. **1D-CNN 接进 CLI**：`cnn.py` 里 build/train/export_tflite 都写好了，
-   需要在装了 TensorFlow 的机器上补一段 LOSO 循环（建议 Python 3.11 + TF 2.16）
-2. **数据增强**：时间偏移、增益抖动、加噪、±10% 时间拉伸。只做训练集，不做 pitch shift
-3. **GUI 壳**：数据目录、模型选择、增强开关、轮数、训练按钮、结果图。内核先跑通再套壳
-4. **端侧时延打点**：从帧就绪到出结果，目标 ≤ 20 ms
+1. **数据增强**：时间偏移、增益抖动、加噪、±10% 时间拉伸。只做训练集，不做 pitch shift
+2. **GUI 壳**：数据目录、模型选择、增强开关、轮数、训练按钮、结果图
+3. **端侧时延打点**：真机上从帧就绪到出结果，目标 ≤ 20 ms（PC 上的数字只能参考）
 
 ## 常见坑
 

@@ -130,8 +130,8 @@ def plot_confusion(result: dict, path: str | Path, title: str = "") -> Path:
     im = ax.imshow(cm, cmap="Blues")
     ax.set_xticks(range(len(labels)), labels, rotation=30, ha="right")
     ax.set_yticks(range(len(labels)), labels)
-    ax.set_xlabel("预测")
-    ax.set_ylabel("真实")
+    ax.set_xlabel("predicted")
+    ax.set_ylabel("true")
     if title:
         ax.set_title(title)
     for i in range(len(labels)):
