@@ -30,7 +30,8 @@ DEFAULT_WINDOW_SEC = 1.0
 DEFAULT_HOP_SEC = 0.25
 
 _NAME_RE = re.compile(
-    r"^(?:(?P<subject>[pP]\d{1,3})_)?(?P<label>[a-zA-Z]+)_(?P<stamp>\d{8}_\d{6})\.wav$"
+    r"^(?:(?P<subject>[pP]\d{1,3})_)?(?P<label>[a-zA-Z]+)_"
+    r"(?P<stamp>\d{8}_\d{6})(?:_\d{1,3})?\.wav$"
 )
 
 
