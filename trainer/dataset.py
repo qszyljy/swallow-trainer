@@ -89,6 +89,12 @@ def scan(root: str | Path) -> list[Record]:
             "LOSO 会因此失真，请把文件名改成 p<编号>_类别_时间戳.wav",
             stacklevel=2,
         )
+    elif "p00" in {r.subject for r in records}:
+        warnings.warn(
+            "有录音的被试编号是 p00（App 的默认值），说明录的时候没选被试。"
+            "这些样本会被当成同一个人，LOSO 结果不可信。",
+            stacklevel=2,
+        )
     return records
 
 
