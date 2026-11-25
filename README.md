@@ -30,7 +30,24 @@ python -m trainer.cli experiments --data data/synthetic --out runs --synthetic
 
 ## 数据怎么放
 
-直接把 App 导出的 WAV 堆在目录里就行，子目录也可以：
+### 方式 A：手机导出的片段包（推荐）
+
+App 的「记录」页右上角有导出按钮，产出 `clips_<时间>.zip`。解压后：
+
+```
+clips_20261125_150000/
+  manifest.csv
+  clips/p03_cough_20261125_143000_ev01.wav
+  clips/p03_swallow_20261125_143500_ev01.wav
+```
+
+`manifest.csv` 的 `start_sec/end_sec` 是手机端人工标注过的精确区间，
+`kind=clip` 表示这个文件本身就是裁好的单个事件。训练端会自动优先读它，
+不再靠能量峰值猜事件边界。直接把 `--data` 指到解压目录即可。
+
+### 方式 B：原始录音目录
+
+直接把 App 导出的 WAV 堆在目录里，子目录也可以：
 
 ```
 data/
@@ -40,10 +57,8 @@ data/
 ```
 
 文件名规范 `[被试编号_]类别_时间戳.wav`，类别取
-`swallow` / `cough` / `interfere` / `rest`。
-
-**没有被试编号就会被塞进 p00，LOSO 直接失真。** 这是手机 App 下一步要加的输入框——
-现在录出来的文件名是 `swallow_20261125_103000.wav`，缺被试。
+`swallow` / `cough` / `interfere` / `rest`。没有被试编号会被塞进 `p00`，
+LOSO 直接失真。这种方式的事件区间由短时能量峰值自动推断，精度不如方式 A。
 
 ## 目录结构
 

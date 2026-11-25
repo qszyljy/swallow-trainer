@@ -1,17 +1,25 @@
 """数据扫描与窗口切片。
 
-数据目录直接用 App 录出来的文件名，平铺或按类别分子目录都能读：
+两种数据来源，扫描时自动判断：
+
+**1. 手机端导出的片段包（推荐）**
+解压 zip 后目录里有 ``manifest.csv``，里面的 ``start_sec/end_sec`` 是人工标注过的
+精确区间，``kind=clip`` 的文件本身就是裁好的单个事件。这种数据不需要再猜事件在哪。
+
+**2. 原始录音目录**
+直接读 App 录出来的文件名：::
 
     data/p01_swallow_20261125_101010.wav
     data/p01_cough_20261125_101100.wav
 
-文件名规范：``[被试编号_]类别_时间戳.wav``，类别取 swallow / cough / interfere / rest。
-没有被试编号时归到 ``p00`` 并给出警告——LOSO 划分必须有被试编号，
-这也是为什么手机 App 需要加一个「被试编号」输入框。
+文件名规范 ``[被试编号_]类别_时间戳.wav``，类别取 swallow / cough / interfere / rest。
+没有被试编号时归到 ``p00`` 并给出警告——LOSO 划分必须有被试编号。
+没有标注时事件区间靠短时能量峰值自动定位，准确度不如人工标注。
 """
 
 from __future__ import annotations
 
+import csv
 import re
 import warnings
 from dataclasses import dataclass
@@ -40,6 +48,11 @@ class Record:
     path: Path
     subject: str
     label: str
+    # 手机端导出的精确事件区间（秒）。None 表示没有标注，只能靠能量峰值定位。
+    event_start: float | None = None
+    event_end: float | None = None
+    # 'clip' 表示这个文件本身就是一个事件片段，整段都算该类
+    kind: str = "recording"
 
 
 @dataclass
@@ -55,6 +68,12 @@ def scan(root: str | Path) -> list[Record]:
     root = Path(root)
     if not root.exists():
         raise FileNotFoundError(f"数据目录不存在：{root}")
+
+    # 手机端导出的 zip 解压后带 manifest.csv，里面是人工标注过的精确区间，
+    # 优先用它——比靠能量峰值猜可靠得多。
+    for manifest in (root / "manifest.csv", *root.glob("*/manifest.csv")):
+        if manifest.exists():
+            return scan_manifest(manifest)
 
     records: list[Record] = []
     missing_subject = 0
@@ -95,6 +114,49 @@ def scan(root: str | Path) -> list[Record]:
             "这些样本会被当成同一个人，LOSO 结果不可信。",
             stacklevel=2,
         )
+    return records
+
+
+def _to_float(value: str | None) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def scan_manifest(manifest: Path) -> list[Record]:
+    """读手机端导出的 manifest.csv。
+
+    列：file,subject,label,source,start_sec,end_sec,kind
+    ``file`` 相对 manifest 所在目录。``kind=clip`` 表示文件本身就是事件片段。
+    """
+    records: list[Record] = []
+    with manifest.open(encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            rel = (row.get("file") or "").strip()
+            if not rel:
+                continue
+            path = (manifest.parent / rel).resolve()
+            if not path.exists():
+                continue
+            label = (row.get("label") or "").strip().lower()
+            if label not in ALL_LABELS:
+                continue
+            subject = (row.get("subject") or "").strip().lower() or "p00"
+            records.append(
+                Record(
+                    path=path,
+                    subject=subject,
+                    label=label,
+                    event_start=_to_float(row.get("start_sec")),
+                    event_end=_to_float(row.get("end_sec")),
+                    kind=(row.get("kind") or "recording").strip().lower(),
+                )
+            )
+    if not records:
+        raise ValueError(f"{manifest} 里没有可用的记录")
     return records
 
 
@@ -158,6 +220,25 @@ def slice_records(
         file_sr, signal = load_wav(rec.path, target_sr=sr)
         if file_sr != sr:
             raise ValueError(f"重采样失败：{rec.path}")
+
+        if rec.kind == "clip":
+            # 片段已经是裁好的单个事件，整段都要，不做重叠率筛选
+            if len(signal) < win:
+                padded = np.zeros(win, dtype=np.float32)
+                padded[: len(signal)] = signal
+                signal = padded
+            for start in range(0, len(signal) - win + 1, hop):
+                samples.append(
+                    Sample(
+                        signal=signal[start : start + win].copy(),
+                        label=rec.label,
+                        subject=rec.subject,
+                        source=rec.path.name,
+                        start_sec=start / sr,
+                    )
+                )
+            continue
+
         if len(signal) < win:
             continue
 
@@ -177,7 +258,10 @@ def slice_records(
                 )
             continue
 
-        t0, t1 = event_interval(signal, sr)
+        if rec.event_start is not None and rec.event_end is not None:
+            t0, t1 = rec.event_start, rec.event_end
+        else:
+            t0, t1 = event_interval(signal, sr)
         for start in range(0, len(signal) - win + 1, hop):
             w0, w1 = start / sr, (start + win) / sr
             overlap = max(0.0, min(w1, t1) - max(w0, t0))
